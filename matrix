@@ -1,0 +1,348 @@
+#!/bin/bash
+
+# Author: Xavier Hollingsworth
+# Date: 01-19-2018
+# Matrix program
+
+# Unfortunately I could not figure out the multiply function in time. Regardless, I will solve it eventually even though I will not be awarded the points for it. It is all a part of the learning process :)
+
+##### Constants
+
+
+
+# Ctrl-c will terminate script execution and remove all temporary files
+trap "echo ' I have trapped Ctrl-C. Now deleting temporary files.'; clean; exit 1" SIGINT
+
+
+##### Functions
+
+# Function to validate files passed in
+validate()
+{
+  # Check if file exists
+  if [ ! -f $1 ]
+  then
+    echo "$1 does not exist." 1>&2 && exit 1
+  
+  # Check if file is readable
+  elif [ ! -r $1 ]
+  then
+    echo "$1 is not readable." 1>&2 && exit 1
+  
+  # Check if file is empty
+  elif [ ! -s $1 ]
+  then
+    echo "$1 is empty." 1>&2 && exit 1
+  fi
+}
+
+
+
+# Function for dims - prints the dimenions of the matrix as the number of rows, followed by a space, then the number of columns
+dims()
+{
+  # Clear temporary dims file for second matrix
+  > dims$$.temp
+
+  # Initialize variables
+  rows=0
+  columns=0
+
+  # Read in rows by number of lines
+  rows=$(wc -l < $1)
+
+  # Calculate number of columns by counting number of elements on first line
+  columns=$(head -n 1 $1 | wc -w)
+  
+  #Display the results
+  echo  "$rows $columns"
+
+  # Output the results to temporary files for later use in other functions
+  echo $rows >> dims$$.temp
+  echo $columns >> dims$$.temp
+}
+
+
+# Function for transpose - reflects the elements of the matrix along the main diagonal. An MxN matrix will become an NxM matrix and the values along the main diagonal will remain unchanged
+transpose()
+{
+  # Validate argument
+  validate $1
+
+  # Create tenp files
+  tc=tempCol$$.temp
+  tr=tempRow$$.temp
+  tp=transpose$$.temp
+  tp1=transpose1$$.temp
+  tp2=transpose2$$.temp
+  
+  # Initatilize variables
+  count=1
+  numColumns=$( head -n 1 $1 | wc -w )
+  
+   
+  while [ $count -le $numColumns ]
+  do
+
+    cut -f $count $1 > $tc
+    cat $tc | tr '\n' '\t' > $tr
+    # Reverse the contents of $tr and store it in $tp
+    rev $tr > $tp
+    cat $tp | cut -c 2- > $tp1
+    # Reverse the contents of $tp1 and store it in $tr
+    rev $tp1 > $tr
+    cat $tr
+    # Append it to a temporary file to be used later by other functions
+    cat $tr >> $tp2
+    count=$[ $count + 1 ]
+  done
+    
+}
+
+
+# Function for mean - takes an MxN matrix and returns a 1XN row vector where the first element is the mean of column one and so on
+mean()
+{
+  # Initialize variables
+  x=0
+  numColumns=$( head -n 1 $1 | wc -w )
+  
+ # Create temp transpose file to read numbers in by row and calculate the mean much easier. Output stdout to /dev/null
+  transpose $1 &>/dev/null
+  
+  # Read in each line from the temp transpose file  
+  while read line
+  do
+    # Initialize variables
+    count=0
+    sum=0
+    mean=0
+    
+    # Loop through each number in the line and add them together to get the sum while incrementing the counter
+    for num in $line
+    do
+      sum=$(expr $sum + $num)
+      count=$(expr $count + 1)
+    done
+    
+    # Calculate the mean given the equation from the assignment
+    mean=$(((sum + (count/2)*( (sum>0)*2-1 )) / count))
+    
+    # Increment counter variable for number of columns in file
+    x=$(expr $x + 1)
+
+    # If counter is not equal to number of columns insert a tab after number. If it is equal insert a newline character after  
+    if [ $x -ne $numColumns ] 
+    then
+      echo -en "$mean\t"
+    elif [ $x -eq $numColumns ]
+    then
+      echo $mean
+    fi
+  # Read in from file transpose2$$.temp
+  done < $tp2
+}
+
+
+# Function for add - takes two MxN matrices and add them together element-wise to produce an MxN matrix. Returns an error if the matrices do not have the same dimensions
+add()
+{
+  # Create temp dims file for first argument and store all stdin and stderr into /dev/null
+  dims $1 &> /dev/null
+  # Extract 1st and 2nd number from temp dims file to retrieve rows and column of first argument
+  row1="$(head -n 1 dims$$.temp)"
+  col1="$(tail -n 1 dims$$.temp)"
+
+  # Create temp dims file for second argument and store all stdin and stderr into /dev/null
+  dims $2 &> /dev/null
+  # Extract 1st and 2nd number from temp dims file to retrieve rows and columns of first arguments
+  row2="$(head -n 1 dims$$.temp)"
+  col2="$(tail -n 1 dims$$.temp)"
+  
+  # Check to make sure the 2 matrices have the same dimensions
+  if [ $row1 -ne $row2 ] || [ $col1 -ne $col2 ]
+  then
+    echo "Matrix dimensions do not match." 1>&2 && exit 1
+  fi
+  
+  # Seperate the numbers from each matrice onto its own line so it can be read in as such
+  cat $1 | tr '\t' '\n' >> first$$.temp
+  cat $2 | tr '\t' '\n' >> second$$.temp
+  
+  # Initialize count and sum 
+  columnCount=0
+  sum=0
+  
+  # Read in one number from each matrix at a time and add them together
+  while read first <&3 && read second <&4
+  do
+    sum=$(($first + $second))
+    
+    # Increment the count 
+    columnCount=$(expr $columnCount + 1)
+    
+    # If column number is less than the number of columns then insert a tab otherwise create a new line
+    if [ $columnCount -lt $col1 ]
+    then
+      echo -en "$sum\t"
+    else
+      echo "$sum"
+    # Reset column count to 0 for start of newline
+    columnCount=0
+    fi
+  # Files being read from
+  done 3<first$$.temp 4<second$$.temp 
+}
+
+
+# Function for multiply - takes an MxN and NxP matrix and produces an MxP matrix
+multiply()
+{
+  # Create temp dims file for first argument and store all stdin and stderr into /dev/null
+  dims $1 &> /dev/null
+  # Extract 1st and 2nd number from temp dims file to retrieve rows and columns of first arguments
+  row1="$(head -n 1 dims$$.temp)"
+  col1="$(tail -n 1 dims$$.temp)"
+
+  # Create temp dims file for second argument and store all stdin and stderr into /dev/null
+  dims $2 &> /dev/null
+  # Extract 1st and 2nd number from temp dims file to retrieve rows and columns of first arguments
+  row2="$(head -n 1 dims$$.temp)"
+  col2="$(tail -n 1 dims$$.temp)"
+
+  # Check to make sure the first matrix's columns is equal to the second matrix's rows - exit with an error if not
+  if [ $col1 -ne $row2 ]
+  then
+    echo "Matrix dimensions do not match." 1>&2  && exit 1
+  fi
+  
+  # Transpose second matrix to make multiplying rows easier
+#  transpose $2 &> /dev/null
+
+
+  # Initialize variables
+#  columnCount=0
+#  rowCount=0
+#  product=0
+#  sum=0
+
+
+  # Read in line in first matrix and store line in variable $first
+#  while read first
+#  do
+    # Read in line in seoncd
+#    while read second
+#    do
+#    done <transpose2$$.temp
+#  done <$1 
+}
+
+
+# Function to remove temporary files
+clean()
+{
+  # Remove all possible temporary files
+  rm -f *.temp
+}
+##### Main
+
+# Check if invalid number of arguments
+if [ $# -gt 4 ]
+then 
+    echo "Too many arguments" 1>&2
+    exit 1
+fi
+
+# Validate files if there are valid number of arguments
+if [ $# -eq 2 ]
+then 
+    validate $2
+elif [ $# -eq 3 ]
+then 
+    validate $2
+    validate $3
+fi 
+
+# Check for functions that accept input from stdin
+if [ $1 = "dims" ] || [ $1 = "transpose" ] || [ $1 = "mean" ]
+then
+  
+  # Read from stdin
+  if [ $# -eq 1 ]
+  then
+    cat > stdin$$.temp
+    sr="stdin$$.temp"
+
+  # Validate stdin file
+    validate $sr
+
+
+  # Error if not correct amount of arguments
+  elif [ $# -lt 2 ]
+  then
+    echo "Not enough arguments" 1>&2 && exit 1
+  elif [ $# -ge 3 ]
+  then
+    echo "Too many arguments" 1>&2 && exit 1
+  fi
+
+fi
+
+
+# Check for functions that accept 2 arguments
+if [ $1 = "add" ] || [ $1 = "multiply" ]
+then
+  
+  # Check to make sure there are the correct number of arguments
+  if [ $# -lt 2 ] || [ $# -gt 3 ]
+  then
+    echo "Incorrect number of arguments" 1>&2 && exit 1
+  fi
+fi
+
+# Check first argument to determine what function to run
+case $1 in
+  dims)
+    if [ $2 ]
+    then
+      dims $2
+    else
+      dims $sr
+    fi
+    ;;
+
+  transpose)
+    if [ $2 ]
+    then
+      transpose $2
+    else
+      transpose $sr
+    fi
+    ;;
+
+  mean)
+    if [ $2 ]
+    then
+      mean $2
+    else
+      mean $sr
+    fi
+    ;;
+
+  add)
+    add $2 $3
+    ;;
+
+  multiply)
+    multiply $2 $3
+    ;;
+
+  *)
+    echo "Unknown operation provided." 1>&2 && exit 1
+    ;;
+esac
+
+# Call clean function to remove temporary files
+clean
+
+# End of program :)
